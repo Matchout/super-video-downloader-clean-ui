@@ -124,7 +124,8 @@ jobs:
               old = read_text(path)
               new = old
 
-              # First root background only. This avoids turning every card into page background.
+              # Change the first explicit background in each target layout.
+              # This usually catches the root container without repainting every card.
               new = re.sub(
                   r'android:background="(@color/[^"]+|#[A-Fa-f0-9]{6,8})"',
                   'android:background="@color/clean_ui_bg"',
@@ -132,7 +133,6 @@ jobs:
                   count=1
               )
 
-              # Unify common top/bottom chrome backgrounds.
               chrome_tags = [
                   "androidx.appcompat.widget.Toolbar",
                   "com.google.android.material.appbar.MaterialToolbar",
@@ -159,7 +159,7 @@ jobs:
 
                   new = re.sub(pattern, repl, new)
 
-              # Bottom navigation should visually belong to the bottom system area.
+              # Make bottom nav use a softer container tone if it is explicitly declared.
               new = re.sub(
                   r'(<com\.google\.android\.material\.bottomnavigation\.BottomNavigationView\b[^>]*android:background=")[^"]+(")',
                   r'\1@color/clean_ui_surface_container\2',
@@ -235,11 +235,7 @@ jobs:
                   print("WARN: defaultConfig block not found")
                   return
 
-              insert = '''
-        ndk {
-            abiFilters.add("arm64-v8a")
-        }
-'''
+              insert = "\n        ndk {\n            abiFilters.add(\"arm64-v8a\")\n        }\n"
 
               pos = match.end()
               new = new[:pos] + insert + new[pos:]
