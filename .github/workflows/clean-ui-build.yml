@@ -77,10 +77,8 @@ jobs:
 
               for name, value in colors.items():
                   if f'name="{name}"' not in new:
-                      new = new.replace(
-                          "</resources>",
-                          f'    <color name="{name}">{value}</color>\n</resources>'
-                      )
+                      line = f'    <color name="{name}">{value}</color>\n'
+                      new = new.replace("</resources>", line + "</resources>")
 
               write_if_changed(path, old, new)
 
@@ -106,17 +104,9 @@ jobs:
               for key, value in items.items():
                   item_line = f'<item name="{key}">{value}</item>'
                   if f'name="{key}"' in new:
-                      new = re.sub(
-                          rf'<item\s+name="{re.escape(key)}">.*?</item>',
-                          item_line,
-                          new
-                      )
+                      new = re.sub(rf'<item\s+name="{re.escape(key)}">.*?</item>', item_line, new)
                   else:
-                      new = new.replace(
-                          "</style>",
-                          f"        {item_line}\n    </style>",
-                          1
-                      )
+                      new = new.replace("</style>", f"        {item_line}\n    </style>", 1)
 
               write_if_changed(path, old, new)
 
@@ -124,8 +114,6 @@ jobs:
               old = read_text(path)
               new = old
 
-              # Change the first explicit background in each target layout.
-              # This usually catches the root container without repainting every card.
               new = re.sub(
                   r'android:background="(@color/[^"]+|#[A-Fa-f0-9]{6,8})"',
                   'android:background="@color/clean_ui_bg"',
@@ -154,12 +142,11 @@ jobs:
                               block
                           )
                       else:
-                          block += '\n        android:background="@color/clean_ui_bg"'
+                          block = block + ' android:background="@color/clean_ui_bg"'
                       return block + end
 
                   new = re.sub(pattern, repl, new)
 
-              # Make bottom nav use a softer container tone if it is explicitly declared.
               new = re.sub(
                   r'(<com\.google\.android\.material\.bottomnavigation\.BottomNavigationView\b[^>]*android:background=")[^"]+(")',
                   r'\1@color/clean_ui_surface_container\2',
@@ -235,8 +222,7 @@ jobs:
                   print("WARN: defaultConfig block not found")
                   return
 
-              insert = "\n        ndk {\n            abiFilters.add(\"arm64-v8a\")\n        }\n"
-
+              insert = ' ndk { abiFilters.add("arm64-v8a") }'
               pos = match.end()
               new = new[:pos] + insert + new[pos:]
 
