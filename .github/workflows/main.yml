@@ -1,15 +1,15 @@
-name: Android Build v1
+name: Android Build v2
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - ".github/workflows/android-build-v1.yml"
+      - ".github/workflows/android-build-v2.yml"
       - "app/**"
-      - "gradle/**"
       - "build.gradle.kts"
       - "settings.gradle.kts"
       - "gradle.properties"
+      - "gradle/**"
       - ".gitmodules"
 
 jobs:
@@ -31,7 +31,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK
+      - name: Install Android SDK components
         run: |
           yes | sdkmanager --licenses
           sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
@@ -44,15 +44,19 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Make Gradle executable
+      - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Build debug APK
+      - name: Build Debug APK
         run: |
           ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Upload APK
+      - name: List APK outputs
+        run: |
+          find app/build/outputs/apk -type f -name "*.apk" -print
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: super-video-downloader-v1-debug-apk
+          name: super-video-downloader-v2-debug-apk
           path: app/build/outputs/apk/debug/*.apk
