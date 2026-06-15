@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
+      - ".github/workflows/main.yml"
       - ".github/workflows/android-build-v2.yml"
       - "app/**"
       - "build.gradle.kts"
