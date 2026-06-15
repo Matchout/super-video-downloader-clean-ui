@@ -47,78 +47,84 @@ jobs:
 
           changed = []
 
-          def read(p):
-              return p.read_text(encoding="utf-8", errors="ignore")
+          def read_text(path):
+              return path.read_text(encoding="utf-8", errors="ignore")
 
-          def write_if_changed(p, old, new):
+          def write_if_changed(path, old, new):
               if new != old:
-                  p.write_text(new, encoding="utf-8")
-                  changed.append(str(p))
-                  print("PATCHED:", p)
+                  path.write_text(new, encoding="utf-8")
+                  changed.append(str(path))
+                  print("PATCHED:", path)
               else:
-                  print("NOCHANGE:", p)
+                  print("NOCHANGE:", path)
 
-          def ensure_color_file(path):
-              p = Path(path)
-              if not p.exists():
-                  print("SKIP missing:", p)
+          def ensure_colors():
+              path = Path("app/src/main/res/values/colors.xml")
+              if not path.exists():
+                  print("SKIP missing:", path)
                   return
 
-              old = read(p)
+              old = read_text(path)
               new = old
 
-              additions = {
+              colors = {
                   "clean_ui_bg": "#FFF5FF",
-                  "clean_ui_surface": "#FDF7FF",
+                  "clean_ui_surface": "#FFF7FF",
                   "clean_ui_surface_container": "#F3EDF7",
                   "clean_ui_primary": "#536EA6",
-                  "clean_ui_divider": "#1F000000",
+                  "clean_ui_divider": "#1F000000"
               }
 
-              for name, value in additions.items():
+              for name, value in colors.items():
                   if f'name="{name}"' not in new:
                       new = new.replace(
                           "</resources>",
                           f'    <color name="{name}">{value}</color>\n</resources>'
                       )
 
-              write_if_changed(p, old, new)
+              write_if_changed(path, old, new)
 
           def patch_theme_file(path):
-              p = Path(path)
-              if not p.exists():
-                  print("SKIP missing:", p)
+              if not path.exists():
+                  print("SKIP missing:", path)
                   return
 
-              old = read(p)
+              old = read_text(path)
               new = old
 
-              # Force window-level colors. Add only if absent.
-              theme_items = [
-                  '<item name="android:windowBackground">@color/clean_ui_bg</item>',
-                  '<item name="android:statusBarColor">@color/clean_ui_bg</item>',
-                  '<item name="android:navigationBarColor">@color/clean_ui_surface_container</item>',
-                  '<item name="android:windowLightStatusBar">true</item>',
-                  '<item name="android:windowLightNavigationBar">true</item>',
-                  '<item name="colorSurface">@color/clean_ui_surface</item>',
-                  '<item name="colorSurfaceVariant">@color/clean_ui_surface_container</item>',
-                  '<item name="colorPrimary">@color/clean_ui_primary</item>',
-              ]
+              items = {
+                  "android:windowBackground": "@color/clean_ui_bg",
+                  "android:statusBarColor": "@color/clean_ui_bg",
+                  "android:navigationBarColor": "@color/clean_ui_surface_container",
+                  "android:windowLightStatusBar": "true",
+                  "android:windowLightNavigationBar": "true",
+                  "colorSurface": "@color/clean_ui_surface",
+                  "colorSurfaceVariant": "@color/clean_ui_surface_container",
+                  "colorPrimary": "@color/clean_ui_primary"
+              }
 
-              for item in theme_items:
-                  key = re.search(r'name="([^"]+)"', item).group(1)
-                  if f'name="{key}"' not in new:
-                      # Insert into first style block.
-                      new = new.replace("</style>", "        " + item + "\n    </style>", 1)
+              for key, value in items.items():
+                  item_line = f'<item name="{key}">{value}</item>'
+                  if f'name="{key}"' in new:
+                      new = re.sub(
+                          rf'<item\s+name="{re.escape(key)}">.*?</item>',
+                          item_line,
+                          new
+                      )
+                  else:
+                      new = new.replace(
+                          "</style>",
+                          f"        {item_line}\n    </style>",
+                          1
+                      )
 
-              write_if_changed(p, old, new)
+              write_if_changed(path, old, new)
 
           def patch_layout_file(path):
-              p = Path(path)
-              old = read(p)
+              old = read_text(path)
               new = old
 
-              # Make root containers use the same page background when they already have a background.
+              # First root background only. This avoids turning every card into page background.
               new = re.sub(
                   r'android:background="(@color/[^"]+|#[A-Fa-f0-9]{6,8})"',
                   'android:background="@color/clean_ui_bg"',
@@ -126,22 +132,22 @@ jobs:
                   count=1
               )
 
-              # Specific UI chrome should not keep the grey-white strip.
+              # Unify common top/bottom chrome backgrounds.
               chrome_tags = [
                   "androidx.appcompat.widget.Toolbar",
                   "com.google.android.material.appbar.MaterialToolbar",
                   "com.google.android.material.appbar.AppBarLayout",
                   "com.google.android.material.bottomnavigation.BottomNavigationView",
-                  "com.google.android.material.navigation.NavigationBarView",
+                  "com.google.android.material.navigation.NavigationBarView"
               ]
 
               for tag in chrome_tags:
                   pattern = rf'(<{re.escape(tag)}\b[^>]*)(>)'
 
-                  def repl(m):
-                      block = m.group(1)
-                      end = m.group(2)
-                      if 'android:background=' in block:
+                  def repl(match):
+                      block = match.group(1)
+                      end = match.group(2)
+                      if "android:background=" in block:
                           block = re.sub(
                               r'android:background="[^"]+"',
                               'android:background="@color/clean_ui_bg"',
@@ -153,18 +159,23 @@ jobs:
 
                   new = re.sub(pattern, repl, new)
 
-              # Bottom navigation should visually merge with the nav bar area.
+              # Bottom navigation should visually belong to the bottom system area.
               new = re.sub(
                   r'(<com\.google\.android\.material\.bottomnavigation\.BottomNavigationView\b[^>]*android:background=")[^"]+(")',
                   r'\1@color/clean_ui_surface_container\2',
                   new
               )
 
-              # Reduce very large top spaces, but keep safe spacing.
               replacements = {
+                  'android:paddingTop="120dp"': 'android:paddingTop="32dp"',
+                  'android:paddingTop="112dp"': 'android:paddingTop="32dp"',
+                  'android:paddingTop="104dp"': 'android:paddingTop="32dp"',
                   'android:paddingTop="96dp"': 'android:paddingTop="32dp"',
                   'android:paddingTop="88dp"': 'android:paddingTop="32dp"',
                   'android:paddingTop="80dp"': 'android:paddingTop="28dp"',
+                  'android:layout_marginTop="120dp"': 'android:layout_marginTop="32dp"',
+                  'android:layout_marginTop="112dp"': 'android:layout_marginTop="32dp"',
+                  'android:layout_marginTop="104dp"': 'android:layout_marginTop="32dp"',
                   'android:layout_marginTop="96dp"': 'android:layout_marginTop="32dp"',
                   'android:layout_marginTop="88dp"': 'android:layout_marginTop="32dp"',
                   'android:layout_marginTop="80dp"': 'android:layout_marginTop="28dp"',
@@ -176,30 +187,51 @@ jobs:
                   'app:cardCornerRadius="12dp"': 'app:cardCornerRadius="20dp"',
                   'app:cardCornerRadius="16dp"': 'app:cardCornerRadius="20dp"',
                   'app:cardElevation="2dp"': 'app:cardElevation="0dp"',
-                  'app:cardElevation="4dp"': 'app:cardElevation="0dp"',
+                  'app:cardElevation="4dp"': 'app:cardElevation="0dp"'
               }
 
-              for a, b in replacements.items():
-                  new = new.replace(a, b)
+              for old_value, new_value in replacements.items():
+                  new = new.replace(old_value, new_value)
 
-              write_if_changed(p, old, new)
+              write_if_changed(path, old, new)
 
-          def patch_gradle_for_arm64(path):
-              p = Path(path)
-              if not p.exists():
-                  print("SKIP missing:", p)
+          def patch_layouts():
+              layout_dir = Path("app/src/main/res/layout")
+              if not layout_dir.exists():
+                  print("SKIP missing:", layout_dir)
                   return
 
-              old = read(p)
+              keywords = [
+                  "main",
+                  "browser",
+                  "settings",
+                  "home",
+                  "navigation",
+                  "bottom",
+                  "progress",
+                  "video"
+              ]
+
+              for path in sorted(layout_dir.glob("*.xml")):
+                  lower_name = path.name.lower()
+                  if any(keyword in lower_name for keyword in keywords):
+                      patch_layout_file(path)
+
+          def patch_gradle_for_arm64():
+              path = Path("app/build.gradle.kts")
+              if not path.exists():
+                  print("SKIP missing:", path)
+                  return
+
+              old = read_text(path)
               new = old
 
-              if "abiFilters.add(\"arm64-v8a\")" in new or "abiFilters += \"arm64-v8a\"" in new:
+              if "arm64-v8a" in new and "abiFilters" in new:
                   print("ABI filter already present")
                   return
 
-              # Insert into defaultConfig block.
-              m = re.search(r'(defaultConfig\s*\{)', new)
-              if not m:
+              match = re.search(r'defaultConfig\s*\{', new)
+              if not match:
                   print("WARN: defaultConfig block not found")
                   return
 
@@ -208,37 +240,26 @@ jobs:
             abiFilters.add("arm64-v8a")
         }
 '''
-              pos = m.end()
+
+              pos = match.end()
               new = new[:pos] + insert + new[pos:]
 
-              write_if_changed(p, old, new)
+              write_if_changed(path, old, new)
 
-          root = Path("app/src/main/res")
+          ensure_colors()
 
-          # Colors.
-          ensure_color_file(root / "values" / "colors.xml")
+          theme_files = [
+              Path("app/src/main/res/values/styles.xml"),
+              Path("app/src/main/res/values/themes.xml"),
+              Path("app/src/main/res/values-night/styles.xml"),
+              Path("app/src/main/res/values-night/themes.xml")
+          ]
 
-          # Theme files.
-          for p in [
-              root / "values" / "styles.xml",
-              root / "values" / "themes.xml",
-              root / "values-night" / "styles.xml",
-              root / "values-night" / "themes.xml",
-          ]:
-              patch_theme_file(p)
+          for theme_file in theme_files:
+              patch_theme_file(theme_file)
 
-          # Layouts most likely responsible for screenshot issues.
-          layout_dir = root / "layout"
-          if layout_dir.exists():
-              for p in layout_dir.glob("*.xml"):
-                  name = p.name.lower()
-                  if any(k in name for k in [
-                      "main", "browser", "settings", "home", "navigation", "bottom", "progress", "video"
-                  ]):
-                      patch_layout_file(p)
-
-          # ABI slimming.
-          patch_gradle_for_arm64("app/build.gradle.kts")
+          patch_layouts()
+          patch_gradle_for_arm64()
 
           print("")
           print("Changed files:")
@@ -261,4 +282,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: super-video-downloader-clean-ui-v2-arm64-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: "app/build/outputs/apk/debug/*.apk"
