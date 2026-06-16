@@ -1,4 +1,4 @@
-name: Clean UI Build v2-r2
+name: Clean UI Build v3 arm64 diagnostic
 
 on:
   workflow_dispatch:
@@ -38,217 +38,77 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      - name: Apply Clean UI patch v2-r2
+      - name: Inspect project structure
+        run: |
+          echo "Root files:"
+          ls -la
+          echo ""
+          echo "App Gradle file:"
+          sed -n '1,220p' app/build.gradle.kts || true
+          echo ""
+          echo "Android resources likely related to UI:"
+          find app/src/main/res -maxdepth 2 -type f \( -name "*.xml" -o -name "*.kt" \) | sort | sed -n '1,220p'
+
+      - name: Apply arm64-only build patch
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          changed = []
+          path = Path("app/build.gradle.kts")
+          if not path.exists():
+              raise SystemExit("app/build.gradle.kts not found")
 
-          def read_text(path):
-              return path.read_text(encoding="utf-8", errors="ignore")
+          old = path.read_text(encoding="utf-8", errors="ignore")
+          new = old
 
-          def write_if_changed(path, old, new):
-              if new != old:
-                  path.write_text(new, encoding="utf-8")
-                  changed.append(str(path))
-                  print("PATCHED:", path)
-              else:
-                  print("NOCHANGE:", path)
+          if "splits {" not in new:
+              marker = re.search(r'android\s*\{', new)
+              if not marker:
+                  raise SystemExit("android block not found in app/build.gradle.kts")
 
-          def ensure_colors():
-              path = Path("app/src/main/res/values/colors.xml")
-              if not path.exists():
-                  print("SKIP missing:", path)
-                  return
+              insert = '''
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a")
+            isUniversalApk = false
+        }
+    }
 
-              old = read_text(path)
-              new = old
-
-              colors = {
-                  "clean_ui_bg": "#FFF5FF",
-                  "clean_ui_surface": "#FFF7FF",
-                  "clean_ui_surface_container": "#F3EDF7",
-                  "clean_ui_primary": "#536EA6",
-                  "clean_ui_divider": "#1F000000"
-              }
-
-              for name, value in colors.items():
-                  if f'name="{name}"' not in new:
-                      line = f'    <color name="{name}">{value}</color>\n'
-                      new = new.replace("</resources>", line + "</resources>")
-
-              write_if_changed(path, old, new)
-
-          def patch_theme_file(path):
-              if not path.exists():
-                  print("SKIP missing:", path)
-                  return
-
-              old = read_text(path)
-              new = old
-
-              items = {
-                  "android:windowBackground": "@color/clean_ui_bg",
-                  "android:statusBarColor": "@color/clean_ui_bg",
-                  "android:navigationBarColor": "@color/clean_ui_surface_container",
-                  "android:windowLightStatusBar": "true",
-                  "android:windowLightNavigationBar": "true",
-                  "colorSurface": "@color/clean_ui_surface",
-                  "colorSurfaceVariant": "@color/clean_ui_surface_container",
-                  "colorPrimary": "@color/clean_ui_primary"
-              }
-
-              for key, value in items.items():
-                  item_line = f'<item name="{key}">{value}</item>'
-                  if f'name="{key}"' in new:
-                      new = re.sub(
-                          rf'<item\s+name="{re.escape(key)}">.*?</item>',
-                          item_line,
-                          new
-                      )
-                  else:
-                      new = new.replace(
-                          "</style>",
-                          f"        {item_line}\n    </style>",
-                          1
-                      )
-
-              write_if_changed(path, old, new)
-
-          def patch_layout_file(path):
-              old = read_text(path)
-              new = old
-
-              # Only change the first explicit root/container background.
-              new = re.sub(
-                  r'android:background="(@color/[^"]+|#[A-Fa-f0-9]{6,8})"',
-                  'android:background="@color/clean_ui_bg"',
-                  new,
-                  count=1
-              )
-
-              # Safe mode:
-              # Do not add new android:background attributes to tags.
-              # Only replace existing background values inside known chrome components.
-              chrome_tags = [
-                  "androidx.appcompat.widget.Toolbar",
-                  "com.google.android.material.appbar.MaterialToolbar",
-                  "com.google.android.material.appbar.AppBarLayout",
-                  "com.google.android.material.bottomnavigation.BottomNavigationView",
-                  "com.google.android.material.navigation.NavigationBarView"
-              ]
-
-              for tag in chrome_tags:
-                  pattern = rf'(<{re.escape(tag)}\b[^>]*android:background=")[^"]+(")'
-                  new = re.sub(pattern, rf'\1@color/clean_ui_bg\2', new)
-
-              # Bottom navigation: only if it already declares android:background.
-              new = re.sub(
-                  r'(<com\.google\.android\.material\.bottomnavigation\.BottomNavigationView\b[^>]*android:background=")[^"]+(")',
-                  r'\1@color/clean_ui_surface_container\2',
-                  new
-              )
-
-              replacements = {
-                  'android:paddingTop="120dp"': 'android:paddingTop="32dp"',
-                  'android:paddingTop="112dp"': 'android:paddingTop="32dp"',
-                  'android:paddingTop="104dp"': 'android:paddingTop="32dp"',
-                  'android:paddingTop="96dp"': 'android:paddingTop="32dp"',
-                  'android:paddingTop="88dp"': 'android:paddingTop="32dp"',
-                  'android:paddingTop="80dp"': 'android:paddingTop="28dp"',
-                  'android:layout_marginTop="120dp"': 'android:layout_marginTop="32dp"',
-                  'android:layout_marginTop="112dp"': 'android:layout_marginTop="32dp"',
-                  'android:layout_marginTop="104dp"': 'android:layout_marginTop="32dp"',
-                  'android:layout_marginTop="96dp"': 'android:layout_marginTop="32dp"',
-                  'android:layout_marginTop="88dp"': 'android:layout_marginTop="32dp"',
-                  'android:layout_marginTop="80dp"': 'android:layout_marginTop="28dp"',
-                  'android:layout_height="96dp"': 'android:layout_height="76dp"',
-                  'android:layout_height="88dp"': 'android:layout_height="76dp"',
-                  'app:itemIconSize="32dp"': 'app:itemIconSize="24dp"',
-                  'app:itemIconSize="30dp"': 'app:itemIconSize="24dp"',
-                  'app:itemIconSize="28dp"': 'app:itemIconSize="24dp"',
-                  'app:cardCornerRadius="12dp"': 'app:cardCornerRadius="20dp"',
-                  'app:cardCornerRadius="16dp"': 'app:cardCornerRadius="20dp"',
-                  'app:cardElevation="2dp"': 'app:cardElevation="0dp"',
-                  'app:cardElevation="4dp"': 'app:cardElevation="0dp"'
-              }
-
-              for old_value, new_value in replacements.items():
-                  new = new.replace(old_value, new_value)
-
-              write_if_changed(path, old, new)
-
-          def patch_layouts():
-              layout_dir = Path("app/src/main/res/layout")
-              if not layout_dir.exists():
-                  print("SKIP missing:", layout_dir)
-                  return
-
-              keywords = [
-                  "main",
-                  "browser",
-                  "settings",
-                  "home",
-                  "navigation",
-                  "bottom",
-                  "progress",
-                  "video"
-              ]
-
-              for path in sorted(layout_dir.glob("*.xml")):
-                  lower_name = path.name.lower()
-                  if any(keyword in lower_name for keyword in keywords):
-                      patch_layout_file(path)
-
-          def patch_gradle_for_arm64():
-              path = Path("app/build.gradle.kts")
-              if not path.exists():
-                  print("SKIP missing:", path)
-                  return
-
-              old = read_text(path)
-              new = old
-
-              if "arm64-v8a" in new and "abiFilters" in new:
-                  print("ABI filter already present")
-                  return
-
-              match = re.search(r'defaultConfig\s*\{', new)
-              if not match:
-                  print("WARN: defaultConfig block not found")
-                  return
-
-              insert = ' ndk { abiFilters.add("arm64-v8a") }'
-              pos = match.end()
+'''
+              pos = marker.end()
               new = new[:pos] + insert + new[pos:]
+              print("Inserted ABI split block for arm64-v8a")
+          else:
+              print("Existing splits block found. Will not blindly edit it.")
 
-              write_if_changed(path, old, new)
+          if "abiFilters" not in new:
+              match = re.search(r'defaultConfig\s*\{', new)
+              if match:
+                  insert = ' ndk { abiFilters.add("arm64-v8a") }'
+                  pos = match.end()
+                  new = new[:pos] + insert + new[pos:]
+                  print("Inserted defaultConfig ndk abiFilters arm64-v8a")
+              else:
+                  print("defaultConfig block not found; skipped abiFilters")
+          else:
+              print("Existing abiFilters found. Will not duplicate it.")
 
-          ensure_colors()
-
-          theme_files = [
-              Path("app/src/main/res/values/styles.xml"),
-              Path("app/src/main/res/values/themes.xml"),
-              Path("app/src/main/res/values-night/styles.xml"),
-              Path("app/src/main/res/values-night/themes.xml")
-          ]
-
-          for theme_file in theme_files:
-              patch_theme_file(theme_file)
-
-          patch_layouts()
-          patch_gradle_for_arm64()
+          if new != old:
+              path.write_text(new, encoding="utf-8")
+              print("PATCHED app/build.gradle.kts")
+          else:
+              print("NOCHANGE app/build.gradle.kts")
 
           print("")
-          print("Changed files:")
-          for item in changed:
-              print(" -", item)
-
-          if not changed:
-              raise SystemExit("Clean UI patch v2-r2 made no changes.")
+          print("Patched Gradle preview:")
+          text = path.read_text(encoding="utf-8", errors="ignore")
+          for i, line in enumerate(text.splitlines(), start=1):
+              if i <= 260:
+                  print(f"{i:04d}: {line}")
           PY
 
       - name: Build arm64 Debug APK
@@ -257,10 +117,36 @@ jobs:
 
       - name: List APK outputs
         run: |
+          echo "APK outputs:"
           find app/build/outputs/apk -type f -name "*.apk" -exec ls -lh {} \;
+          echo ""
+          echo "APK files:"
+          find app/build/outputs/apk -type f -name "*.apk" -print
 
-      - name: Upload Clean UI arm64 Debug APK
+      - name: Inspect APK native libraries
+        run: |
+          mkdir -p /tmp/apk-inspect
+          first_apk="$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)"
+          echo "First APK: $first_apk"
+          if [ -z "$first_apk" ]; then
+            echo "No APK found"
+            exit 1
+          fi
+          unzip -l "$first_apk" | grep '^ *[0-9]' | grep 'lib/.*/.*\.so' | sed -n '1,220p' || true
+          echo ""
+          echo "ABI folders in first APK:"
+          unzip -l "$first_apk" | grep 'lib/' | awk -F/ '{print $2}' | sort -u || true
+
+      - name: Upload arm64 Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: super-video-downloader-clean-ui-v2-r2-arm64-debug-apk
+          name: super-video-downloader-v3-arm64-debug-apk
+          path: "app/build/outputs/apk/debug/*arm64*.apk"
+          if-no-files-found: warn
+
+      - name: Upload fallback Debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: super-video-downloader-v3-debug-apks-fallback
           path: "app/build/outputs/apk/debug/*.apk"
+          if-no-files-found: error
